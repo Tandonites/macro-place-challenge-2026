@@ -23,9 +23,21 @@ print(f"Hard Macros: {benchmark.num_hard_macros}")
 print(f"Soft Macros: {benchmark.num_soft_macros}")
 print(f"Total Macros: {benchmark.num_macros}")
 
+hard_mask = benchmark.get_hard_macro_mask()
+# hard_positions = benchmark.macro_positions[hard_mask]
+hard_dimensions = benchmark.macro_sizes[hard_mask]
+print(f"Hard macro width range: {hard_dimensions[:,0].min():.1f} to {hard_dimensions[:,0].max():.1f}")
+print(f"Hard macro height range: {hard_dimensions[:,1].min():.1f} to {hard_dimensions[:,1].max():.1f}")
+
+
 # Soft Macro Positions
 soft_mask = benchmark.get_soft_macro_mask()
 soft_positions = benchmark.macro_positions[soft_mask]
+
+soft_dimensions = benchmark.macro_sizes[soft_mask]
+print(f"Soft macro width range: {soft_dimensions[:,0].min():.1f} to {soft_dimensions[:,0].max():.1f}")
+print(f"Soft macro height range: {soft_dimensions[:,1].min():.1f} to {soft_dimensions[:,1].max():.1f}")
+
 print(f"Soft macro x range: {soft_positions[:,0].min():.1f} to {soft_positions[:,0].max():.1f}")
 print(f"Soft macro y range: {soft_positions[:,1].min():.1f} to {soft_positions[:,1].max():.1f}")
 
