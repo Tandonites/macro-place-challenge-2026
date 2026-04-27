@@ -16,25 +16,29 @@ import torch
 from macro_place.benchmark import Benchmark
 from macro_place.loader import load_benchmark_from_dir
 
-benchmark, plc  = load_benchmark_from_dir("external/MacroPlacement/Testcases/ICCAD04/ibm01")
+benchmark, plc = load_benchmark_from_dir("external/MacroPlacement/Testcases/ICCAD04/ibm01")
 
 # Macro counts
 print(f"Hard Macros: {benchmark.num_hard_macros}")
 print(f"Soft Macros: {benchmark.num_soft_macros}")
 print(f"Total Macros: {benchmark.num_macros}")
 
+# Hard macro stats
 hard_mask = benchmark.get_hard_macro_mask()
-# hard_positions = benchmark.macro_positions[hard_mask]
+hard_positions = benchmark.macro_positions[hard_mask]
 hard_dimensions = benchmark.macro_sizes[hard_mask]
+
 print(f"Hard macro width range: {hard_dimensions[:,0].min():.1f} to {hard_dimensions[:,0].max():.1f}")
 print(f"Hard macro height range: {hard_dimensions[:,1].min():.1f} to {hard_dimensions[:,1].max():.1f}")
 
+print(f"Hard macro x range: {hard_positions[:,0].min():.1f} to {hard_positions[:,0].max():.1f}")
+print(f"Hard macro y range: {hard_positions[:,1].min():.1f} to {hard_positions[:,1].max():.1f}")
 
-# Soft Macro Positions
+# Soft macro stats
 soft_mask = benchmark.get_soft_macro_mask()
 soft_positions = benchmark.macro_positions[soft_mask]
-
 soft_dimensions = benchmark.macro_sizes[soft_mask]
+
 print(f"Soft macro width range: {soft_dimensions[:,0].min():.1f} to {soft_dimensions[:,0].max():.1f}")
 print(f"Soft macro height range: {soft_dimensions[:,1].min():.1f} to {soft_dimensions[:,1].max():.1f}")
 
