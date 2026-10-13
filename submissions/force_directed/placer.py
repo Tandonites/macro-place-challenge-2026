@@ -2,12 +2,13 @@ from pathlib import Path
 from macro_place.loader import load_benchmark_from_dir
 from macro_place.utils import visualize_placement
 from graph import build_weight_graph
-from force import force_directed
+from force import force_directed, place_isolated, legalize
+from sa import sa_refine
 from macro_place.objective import compute_proxy_cost
 
 BENCHMARKS = [
-    "ibm01",
-    "ibm02", "ibm03", "ibm04", "ibm06", "ibm07", "ibm08", "ibm09",
+    "ibm01", "ibm02", 
+    "ibm03", "ibm04", "ibm06", "ibm07", "ibm08", "ibm09",
     "ibm10", "ibm11", "ibm12", "ibm13", "ibm14", "ibm15", "ibm16", "ibm17", "ibm18",
 ]
 
@@ -24,6 +25,7 @@ for name in BENCHMARKS:
     adj = build_weight_graph(benchmark, plc)
     # compute initial placement
     placement = force_directed(benchmark, adj, pos_map)
+    placement = legalize(benchmark, placement)
 
     # compute proxy costs
     costs = compute_proxy_cost(placement, benchmark, plc)
@@ -32,6 +34,12 @@ for name in BENCHMARKS:
     print(f"{'Benchmark':<12} {'Proxy':>8} {'WL':>8} {'Den':>8} {'Cong':>8} {'Overlaps':>10}")
     print("-" * 60)
     print(f"{name:<12} {costs['proxy_cost']:>8.4f} {costs['wirelength_cost']:>8.4f} {costs['density_cost']:>8.4f} {costs['congestion_cost']:>8.4f} {costs['overlap_count']:>10}")
+    
+    # print(f"After SA: {costs['proxy_cost']:.4f}, Overlaps: {costs['overlap_count']}")
+    # total_proxy += costs['proxy_cost']
+    # print(f"{'Benchmark':<12} {'Proxy':>8} {'WL':>8} {'Den':>8} {'Cong':>8} {'Overlaps':>10}")
+    # print("-" * 60)
+    # print(f"{name:<12} {costs['proxy_cost']:>8.4f} {costs['wirelength_cost']:>8.4f} {costs['density_cost']:>8.4f} {costs['congestion_cost']:>8.4f} {costs['overlap_count']:>10}")
     
     img_name = name + ".png"
     img_path = Path("vis/force_directed") / name
