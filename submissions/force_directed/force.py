@@ -4,10 +4,10 @@ from pathlib import Path
 from macro_place.benchmark import Benchmark
 
 def force_directed(benchmark, adj, pos_map, 
-                spring_constant=0.95,
-                repulsion_constant=1.8, 
+                spring_constant=1,
+                repulsion_constant=1, 
                 step_size=0.01,
-                num_iterations=200,
+                num_iterations=20,
                 seed=67):
     placement = benchmark.macro_positions.clone()
     rng = np.random.default_rng(seed)
@@ -44,17 +44,21 @@ def force_directed(benchmark, adj, pos_map,
             positions[i, 0] = max(half_w, min(positions[i, 0], benchmark.canvas_width - half_w))
             positions[i, 1] = max(half_h, min(positions[i, 1], benchmark.canvas_height - half_h))
         
-    for i in hard_indices:
+    for i, idx in enumerate(hard_indices):
         name = benchmark.macro_names[i]
         placement[idx, 0] = float(positions[i, 0])
         placement[idx, 1] = float(positions[i, 1])
-    
+        
+    moved = sum(1 for i, idx in enumerate(hard_indices)
+        if abs(placement[idx, 0].item() - positions[i, 0]) > 1e-6)
+    print("macros whose FD result was written back:", len(hard_indices) - moved)
     placement = resolve_overlaps(benchmark, placement, hard_indices)
+    
     
     return placement
     
     
-def resolve_overlaps(benchmark, placement, hard_indices, max_passes=50):
+def resolve_overlaps(benchmark, placement, hard_indices, max_passes=25):
     for pass_num in range(max_passes):
         overlap_count = 0
         
@@ -105,7 +109,6 @@ def resolve_overlaps(benchmark, placement, hard_indices, max_passes=50):
                         placement[idx, 0] = max(hw, min(placement[idx, 0].item(), benchmark.canvas_width - hw))
                         placement[idx, 1] = max(hh, min(placement[idx, 1].item(), benchmark.canvas_height - hh))
         
-        print(f"Pass {pass_num + 1}: {overlap_count} overlaps")
         if overlap_count == 0:
             break
     
@@ -211,3 +214,227 @@ def legalize(benchmark, placement, step_frac=0.005, max_rings=400, gap=0.002):
 
     return placement
     
+# def force_directed_vec(benchmark, adj, pos_map, initial_placement=None,
+#                        spring_constant=0.95, repulsion_constant=1.8,
+#                        step_size=0.01, num_iterations=300,
+#                        live_hard_neighbors=False, max_step_frac=0.02, device="cpu"):
+#     base = initial_placement if initial_placement is not None else benchmark.macro_positions
+#     placement = base.clone()
+#     names = benchmark.macro_names
+#     dt = torch.float64
+
+#     hard_mask = benchmark.get_hard_macro_mask()
+#     hard_indices = torch.where(hard_mask)[0].tolist()
+#     n = len(hard_indices)
+#     name_to_i = {names[idx]: i for i, idx in enumerate(hard_indices)}
+
+#     pos = placement[hard_indices].to(dt).to(device)                  # [n, 2]
+#     half = (benchmark.macro_sizes[hard_indices].to(dt) / 2).to(device)
+#     canvas = torch.tensor([benchmark.canvas_width, benchmark.canvas_height],
+#                           dtype=dt, device=device)
+#     lo, hi = half, canvas - half
+#     movable = benchmark.get_movable_mask()[hard_indices].to(device)  # fixed macros don't move
+
+#     # ---- precompute attraction terms ----
+#     A = torch.zeros(n, 2, dtype=dt)
+#     Wsum = torch.zeros(n, dtype=dt)
+#     rows, cols, vals = [], [], []
+#     for i, idx in enumerate(hard_indices):
+#         for nb, w in adj[names[idx]].items():
+#             if live_hard_neighbors and nb in name_to_i:
+#                 rows.append(i); cols.append(name_to_i[nb]); vals.append(w)
+#             else:
+#                 m = pos_map[nb]
+#                 A[i, 0] += w * m.x
+#                 A[i, 1] += w * m.y
+#             Wsum[i] += w
+#     A, Wsum = A.to(device), Wsum.to(device)
+#     Wh = (torch.sparse_coo_tensor([rows, cols], vals, (n, n), dtype=dt, device=device)
+#           if rows else None)
+
+#     eye = torch.eye(n, dtype=torch.bool, device=device)
+
+#     for _ in range(num_iterations):
+#         # attraction
+#         pull = A if Wh is None else A + torch.sparse.mm(Wh, pos)
+#         f = spring_constant * (pull - Wsum[:, None] * pos)
+
+#         # repulsion
+#         diff = pos[:, None, :] - pos[None, :, :]          # [n, n, 2]
+#         d2 = (diff ** 2).sum(-1)                          # [n, n]
+#         valid = (~eye) & (d2 > 1e-12)
+#         inv_d3 = torch.where(valid, d2.clamp_min(1e-12) ** -1.5, torch.zeros_like(d2))
+#         f = f + repulsion_constant * (diff * inv_d3[..., None]).sum(dim=1)
+
+#         # forces
+#         pull = A if Wh is None else A + torch.sparse.mm(Wh, pos)
+#         diff = pos[:, None, :] - pos[None, :, :]
+#         d2 = (diff ** 2).sum(-1)
+#         valid = (~eye) & (d2 > 1e-12)
+#         inv_d3 = torch.where(valid, d2.clamp_min(1e-12) ** -1.5, torch.zeros_like(d2))
+#         rep = repulsion_constant * (diff * inv_d3[..., None]).sum(dim=1)
+
+#         # implicit attraction step (stable)
+#         denom = (1 + step_size * spring_constant * Wsum)[:, None]
+#         new = (pos + step_size * (spring_constant * pull + rep)) / denom
+
+#         # cap per-iteration displacement
+#         delta = new - pos
+#         max_step = max_step_frac * canvas.min()
+#         norm = delta.norm(dim=1, keepdim=True).clamp_min(1e-12)
+#         delta = delta * torch.clamp(max_step / norm, max=1.0)
+#         new = pos + delta
+
+#         # freeze fixed macros, clamp to canvas
+#         pos = torch.where(movable[:, None], new, pos)
+#         pos = torch.max(torch.min(pos, hi), lo)
+
+#     placement[hard_indices] = pos.to(placement.dtype).cpu()
+#     return placement
+
+def build_edges(plc, pos_map):
+    names = list(pos_map.keys())
+    name_to_k = {n: k for k, n in enumerate(names)}
+    xy = np.array([[pos_map[n].x, pos_map[n].y] for n in names], dtype=np.float64)
+    ea, eb, ew = [], [], []
+    for m in plc.modules_w_pins:
+        if m.get_type() != "MACRO":
+            continue
+        a = name_to_k[m.get_name()]
+        for nb, w in m.get_connection().items():
+            if nb in name_to_k:
+                ea.append(a); eb.append(name_to_k[nb]); ew.append(w)
+    return name_to_k, xy, np.array(ea), np.array(eb), np.array(ew, dtype=np.float64)
+
+
+def rudy_map(xy, ea, eb, ew, W, H, grid_n):
+    cw, ch = W / grid_n, H / grid_n
+    C = np.zeros((grid_n, grid_n))
+    x1, y1, x2, y2 = xy[ea, 0], xy[ea, 1], xy[eb, 0], xy[eb, 1]
+    lx, hx = np.minimum(x1, x2), np.maximum(x1, x2)
+    ly, hy = np.minimum(y1, y2), np.maximum(y1, y2)
+    wb = np.maximum(hx - lx, cw)   # avoid zero-size boxes
+    hb = np.maximum(hy - ly, ch)
+    val = ew * (wb + hb) / (wb * hb)
+    c0 = np.clip((lx / cw).astype(int), 0, grid_n - 1)
+    c1 = np.clip((hx / cw).astype(int), 0, grid_n - 1)
+    r0 = np.clip((ly / ch).astype(int), 0, grid_n - 1)
+    r1 = np.clip((hy / ch).astype(int), 0, grid_n - 1)
+    for k in range(len(val)):
+        C[r0[k]:r1[k] + 1, c0[k]:c1[k] + 1] += val[k]
+
+    # 3x3 box blur for a smoother gradient
+    P = np.pad(C, 1, mode="edge")
+    C = sum(P[1 + dr:1 + dr + grid_n, 1 + dc:1 + dc + grid_n]
+            for dr in (-1, 0, 1) for dc in (-1, 0, 1)) / 9.0
+
+    C = C / max(C.mean(), 1e-12)
+    gy, gx = np.gradient(C, ch, cw)    # dC/dy, dC/dx per micron
+    return gx, gy
+
+def rudy_nudge(benchmark, plc, pos_map, placement,
+               alpha=0.5, iters=3, grid_n=32, move_soft=False):
+    W, H = benchmark.canvas_width, benchmark.canvas_height
+    cw, ch = W / grid_n, H / grid_n
+    names = benchmark.macro_names
+    name_to_k, all_xy, ea, eb, ew = build_edges(plc, pos_map)
+
+    mask = benchmark.get_hard_macro_mask() & benchmark.get_movable_mask()
+    if move_soft:
+        mask = mask | benchmark.get_soft_macro_mask()
+    idxs = torch.where(mask)[0].tolist()
+    ks = np.array([name_to_k[names[i]] for i in idxs])
+
+    pos = placement[idxs].numpy().astype(np.float64)
+    half = benchmark.macro_sizes[idxs].numpy().astype(np.float64) / 2
+    hi = np.array([W, H]) - half
+
+    for _ in range(iters):
+        all_xy[ks] = pos
+        gx, gy = rudy_map(all_xy, ea, eb, ew, W, H, grid_n)
+        cols = np.clip((pos[:, 0] / cw).astype(int), 0, grid_n - 1)
+        rows = np.clip((pos[:, 1] / ch).astype(int), 0, grid_n - 1)
+        g = np.stack([gx[rows, cols], gy[rows, cols]], axis=1)
+        gmax = np.abs(g).max()
+        if gmax < 1e-12:
+            break
+        pos -= alpha * np.array([cw, ch]) * g / gmax
+        pos = np.clip(pos, half, hi)
+
+    placement[idxs] = torch.tensor(pos, dtype=placement.dtype)
+    return placement
+
+def force_directed_cong(benchmark, plc, adj, pos_map,
+                        spring_constant=1, repulsion_constant=1.2,
+                        step_size=0.01, num_iterations=1,
+                        k_cong=0.1, grid_n=32, rebuild_every=10,
+                        warmup_frac=0.3, debug=True):
+    placement = benchmark.macro_positions.clone()
+    W, H = benchmark.canvas_width, benchmark.canvas_height
+    cw, ch = W / grid_n, H / grid_n
+
+    hard_mask = benchmark.get_hard_macro_mask()
+    hard_indices = torch.where(hard_mask)[0].tolist()
+    positions = placement[hard_indices].numpy()
+
+    name_to_k, all_xy, ea, eb, ew = build_edges(plc, pos_map)
+    hard_k = np.array([name_to_k[benchmark.macro_names[idx]] for idx in hard_indices])
+
+    warmup = int(warmup_frac * num_iterations)
+    gx = gy = None
+    printed = False
+
+    for it in range(num_iterations):
+        if k_cong > 0 and it >= warmup and (it - warmup) % rebuild_every == 0:
+            all_xy[hard_k] = positions
+            gx, gy = rudy_map(all_xy, ea, eb, ew, W, H, grid_n)
+
+        att_mags, cong_mags = [], []
+
+        for i, idx in enumerate(hard_indices):
+            force = np.zeros(2)
+            name = benchmark.macro_names[idx]
+
+            # attraction (same as original)
+            f_att = np.zeros(2)
+            for neighbor_name, weight in adj[name].items():
+                nb = pos_map[neighbor_name]
+                f_att += spring_constant * weight * (np.array([nb.x, nb.y]) - positions[i])
+            force += f_att
+
+            # repulsion (same as original)
+            for j in range(len(hard_indices)):
+                if j == i:
+                    continue
+                diff = positions[i] - positions[j]
+                distance = np.linalg.norm(diff)
+                if distance < 1e-6:
+                    continue
+                force += repulsion_constant / distance ** 2 * (diff / distance)
+
+            # congestion
+            if gx is not None:
+                col = min(max(int(positions[i, 0] / cw), 0), grid_n - 1)
+                row = min(max(int(positions[i, 1] / ch), 0), grid_n - 1)
+                f_cong = -k_cong * np.array([gx[row, col], gy[row, col]])
+                force += f_cong
+                if debug and not printed:
+                    att_mags.append(np.linalg.norm(f_att))
+                    cong_mags.append(np.linalg.norm(f_cong))
+
+            positions[i] += step_size * force
+
+            hw = benchmark.macro_sizes[idx, 0].item() / 2
+            hh = benchmark.macro_sizes[idx, 1].item() / 2
+            positions[i, 0] = max(hw, min(positions[i, 0], W - hw))
+            positions[i, 1] = max(hh, min(positions[i, 1], H - hh))
+
+        if debug and not printed and cong_mags:
+            print(f"[calib] median |F_att|={np.median(att_mags):.4f}  "
+                  f"median |F_cong|={np.median(cong_mags):.4f}")
+            printed = True
+
+    for i, idx in enumerate(hard_indices):
+        placement[idx, 0] = float(positions[i, 0])
+        placement[idx, 1] = float(positions[i, 1])
+    return placement
